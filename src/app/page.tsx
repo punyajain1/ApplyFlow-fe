@@ -119,13 +119,10 @@ export default function Home() {
     document.body.removeChild(link);
   };
 
-  const setPreset = (preset: "intern" | "backend" | "fresher" | "remote") => {
-    if (preset === "intern") setFormData(f => ({ ...f, searchTerm: "software developer intern", googleSearchTerm: "software developer intern jobs in India", internshalaSearchTerm: "software-development", jobType: "internship", isRemote: "false", hoursOld: "72", defaultCountry: "India", location: "India" }));
-    if (preset === "backend") setFormData(f => ({ ...f, searchTerm: "backend developer", googleSearchTerm: "backend developer jobs", internshalaSearchTerm: "backend-development", jobType: "Any", isRemote: "false", hoursOld: "72", defaultCountry: "India", location: "India" }));
-
-
-    if (preset === "fresher") setFormData(f => ({ ...f, searchTerm: "fresher software engineer", googleSearchTerm: "fresher software engineer jobs", internshalaSearchTerm: "software-devloper-intern", jobType: "fulltime", isRemote: "false", hoursOld: "72", defaultCountry: "India", location: "India" }));
-    if (preset === "remote") setFormData(f => ({ ...f, searchTerm: "software developer", googleSearchTerm: "remote software developer jobs", internshalaSearchTerm: "software-development", jobType: "fulltime", isRemote: "true", hoursOld: "72", defaultCountry: "India", location: "India" }));
+  const setPreset = (preset: "bcom_intern" | "software_developer" | "software_intern") => {
+    if (preset === "bcom_intern") setFormData(f => ({ ...f, searchTerm: "finance intern", googleSearchTerm: "commerce graduate fresher jobs in India", internshalaSearchTerm: "accounting-finance", jobType: "", isRemote: "false", hoursOld: "120", defaultCountry: "India", location: "India" }));
+    if (preset === "software_developer") setFormData(f => ({ ...f, searchTerm: "software developer", googleSearchTerm: "software developer jobs in India", internshalaSearchTerm: "software-development", jobType: "", isRemote: "false", hoursOld: "120", defaultCountry: "India", location: "India" }));
+    if (preset === "software_intern") setFormData(f => ({ ...f, searchTerm: "software engineer intern", googleSearchTerm: "software engineer intern jobs in India", internshalaSearchTerm: "software-engineering", jobType: "", isRemote: "false", hoursOld: "120", defaultCountry: "India", location: "India" }));
   };
 
   return (
@@ -287,17 +284,14 @@ export default function Home() {
 
         {/* Preset tags below the card */}
         <div className="flex flex-wrap items-center justify-center gap-2 mt-6">
-          <button onClick={() => setPreset("intern")} className="px-4 py-1.5 bg-white border border-neutral-200 text-neutral-500 text-[13px] font-medium rounded-full hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-sm">
-            Internships
+          <button onClick={() => setPreset("software_developer")} className="px-4 py-1.5 bg-white border border-neutral-200 text-neutral-500 text-[13px] font-medium rounded-full hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-sm">
+            Software Developer
           </button>
-          <button onClick={() => setPreset("backend")} className="px-4 py-1.5 bg-white border border-neutral-200 text-neutral-500 text-[13px] font-medium rounded-full hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-sm">
-            Backend Dev
+          <button onClick={() => setPreset("software_intern")} className="px-4 py-1.5 bg-white border border-neutral-200 text-neutral-500 text-[13px] font-medium rounded-full hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-sm">
+            Software Engineer Intern
           </button>
-          <button onClick={() => setPreset("fresher")} className="px-4 py-1.5 bg-white border border-neutral-200 text-neutral-500 text-[13px] font-medium rounded-full hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-sm">
-            Fresher Fulltime
-          </button>
-          <button onClick={() => setPreset("remote")} className="px-4 py-1.5 bg-white border border-neutral-200 text-neutral-500 text-[13px] font-medium rounded-full hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-sm">
-            Remote Only
+          <button onClick={() => setPreset("bcom_intern")} className="px-4 py-1.5 bg-white border border-neutral-200 text-neutral-500 text-[13px] font-medium rounded-full hover:bg-neutral-50 hover:text-neutral-900 transition-colors shadow-sm">
+            B.COM / Finance Intern
           </button>
         </div>
 
