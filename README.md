@@ -1,3 +1,18 @@
+# Job Frontend (Telegram Project)
+
+This repository contains the frontend interface tailored for my Telegram project. It is designed to provide easy access and data extraction capabilities while significantly minimizing the cost of hosting an n8n workflow. It efficiently reuses the same existing hosted backend for its operations.
+
+## Tech Stack
+
+- **Framework:** [Next.js](https://nextjs.org/) (React)
+- **Styling:** [Tailwind CSS](https://tailwindcss.com/)
+- **Animations:** [Framer Motion](https://motion.dev/)
+- **Language:** [TypeScript](https://www.typescriptlang.org/)
+- **Icons:** [Lucide React](https://lucide.dev/)
+- **Data Parsing:** [PapaParse](https://www.papaparse.com/)
+
+---
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
