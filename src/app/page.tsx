@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Loader2, Download, SlidersHorizontal, ArrowRight, Github } from "lucide-react";
+import { Search, Loader2, Download, ArrowRight, Github } from "lucide-react";
 import Papa from "papaparse";
+import axios from "axios";
+
+type JobRecord = Record<string, string | number | boolean | null | undefined>;
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
-  const [jobs, setJobs] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<JobRecord[]>([]);
   
   const [formData, setFormData] = useState({
     searchTerm: "",
@@ -36,7 +39,7 @@ export default function Home() {
     
     try {
       // Map frontend camelCase to backend UPPER_CASE params
-      const apiParams: Record<string, any> = {
+      const apiParams: Record<string, string | number | boolean> = {
         SEARCH_TERM: formData.searchTerm,
         LOCATION: formData.location,
         GOOGLE_SEARCH_TERM: formData.googleSearchTerm,
@@ -49,32 +52,33 @@ export default function Home() {
 
       // Filter out empty string params if needed
       const filteredParams = Object.fromEntries(
-        Object.entries(apiParams).filter(([_, v]) => v !== "" && v !== null && v !== undefined)
+        Object.entries(apiParams).filter(([, value]) => value !== "" && value !== null && value !== undefined)
       );
 
-      // Sending directly to Railway from the browser to bypass Vercel's 60-second limit
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://jobscrappertelegrambot-production.up.railway.app/job-search";
-
-      const res = await fetch(apiUrl, {
-        method: 'POST',
+      const res = await axios.post("https://job-scrapper-telegrambot.onrender.com/job-search", filteredParams, {
         headers: {
           'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(filteredParams)
+        }
       });
       
-      const data = await res.json();
+      const data = res.data;
 
-      if (!res.ok || data.success === false) {
+      if (data.success === false) {
         throw new Error(data.message || "Failed to fetch jobs from server");
       }
       
       setJobs(data.jobs || []);
       setLoading(false);
       
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to fetch jobs:", err);
-      alert(`Error fetching jobs: ${err.message || 'Check console for details.'}`);
+      let message = "Check console for details.";
+      if (axios.isAxiosError(err)) {
+        message = err.response?.data?.message || err.message;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
+      alert(`Error fetching jobs: ${message}`);
       setLoading(false);
     }
   };
@@ -323,7 +327,7 @@ export default function Home() {
               </button>
 
               {/* Data Table */}
-              <div className="overflow-x-auto border border-neutral-200 rounded-xl max-h-[500px]">
+              <div className="overflow-x-auto border border-neutral-200 rounded-xl max-h-125">
                 <table className="w-full text-left text-sm whitespace-nowrap">
                   <thead className="bg-neutral-50 text-neutral-600 sticky top-0 uppercase tracking-wider text-xs">
                     <tr>
@@ -334,9 +338,9 @@ export default function Home() {
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
                     {jobs.map((job, idx) => (
-                      <tr key={job.id || idx} className="hover:bg-neutral-50/50 transition-colors">
+                      <tr key={String(job.id ?? idx)} className="hover:bg-neutral-50/50 transition-colors">
                         {getOrderedColumns().map((col) => (
-                          <td key={col} className="px-4 py-3 text-neutral-700 max-w-[250px] truncate">
+                          <td key={col} className="px-4 py-3 text-neutral-700 max-w-62.5 truncate">
                             {job[col] !== null && job[col] !== undefined ? String(job[col]) : "-"}
                           </td>
                         ))}
