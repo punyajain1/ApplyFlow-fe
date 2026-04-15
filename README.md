@@ -22,10 +22,10 @@ It repurposes the backend from my organization Telegram bot project, collects se
 
 ```mermaid
 flowchart LR
-		U[User in Browser] --> FE[Next.js App Router Frontend]
-		FE -->|POST /job-search| BE[Hosted JOB_SCRAPPER_TelegramBot Backend]
-		BE -->|JSON jobs[]| FE
-		FE -->|Export| CSV[CSV Download via PapaParse]
+	U[User in Browser] --> FE[Next.js App Router Frontend]
+	FE -->|POST /job-search| BE[Hosted JOB_SCRAPPER_TelegramBot Backend]
+	BE -->|JSON jobs list| FE
+	FE -->|Export CSV| CSV[CSV Download via PapaParse]
 ```
 
 ### Request Flow
