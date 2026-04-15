@@ -1,51 +1,86 @@
-# Job Frontend (Telegram Project)
+# Job FE
 
-This repository contains the frontend interface tailored for my Telegram project. It is designed to provide easy access and data extraction capabilities while significantly minimizing the cost of hosting an n8n workflow. It efficiently reuses the same existing hosted backend for its operations.
+Frontend for the job search workflow used by my Telegram automation stack.
+It repurposes the backend from my organization Telegram bot project, collects search filters from the UI, and lets users generate and download results as CSV files.
+
+## Related Project
+
+- Organization backend + bot project (full feature set): [JOB_SCRAPPER_TelegramBot](https://github.com/punyajain1/JOB_SCRAPPER_TelegramBot)
+- This frontend is a focused UI layer for search + CSV export and reuses the backend from that bot project, while the bot repository contains additional Telegram-first automation features.
 
 ## Tech Stack
 
-- **Framework:** [Next.js](https://nextjs.org/) (React)
-- **Styling:** [Tailwind CSS](https://tailwindcss.com/)
-- **Animations:** [Framer Motion](https://motion.dev/)
-- **Language:** [TypeScript](https://www.typescriptlang.org/)
-- **Icons:** [Lucide React](https://lucide.dev/)
-- **Data Parsing:** [PapaParse](https://www.papaparse.com/)
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)
+![React](https://img.shields.io/badge/React-19-20232A?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![Framer Motion](https://img.shields.io/badge/Framer_Motion-Animation-0055FF?logo=framer&logoColor=white)
+![Axios](https://img.shields.io/badge/Axios-HTTP-5A29E4)
+![PapaParse](https://img.shields.io/badge/PapaParse-CSV-2F855A)
 
----
+## Architecture
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+```mermaid
+flowchart LR
+		U[User in Browser] --> FE[Next.js App Router Frontend]
+		FE -->|POST /job-search| BE[Hosted JOB_SCRAPPER_TelegramBot Backend]
+		BE -->|JSON jobs[]| FE
+		FE -->|Export| CSV[CSV Download via PapaParse]
+```
 
-## Getting Started
+### Request Flow
 
-First, run the development server:
+1. User enters filters such as search term, location, recency, remote, and job type.
+2. Frontend maps camelCase form fields to backend API params.
+3. Frontend sends a POST request to the backend job-search endpoint.
+4. Backend returns normalized job results.
+5. Frontend displays count and allows CSV export.
+
+## Setup
+
+### Prerequisites
+
+- Node.js 20+
+- npm 10+
+
+### Install
+
+```bash
+npm install
+```
+
+### Run in Development
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Lint
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+```
 
-## Learn More
+### Production Build
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run build
+npm run start
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```text
+src/
+	app/
+		layout.tsx      # Root layout + metadata
+		page.tsx        # Main UI, API call, CSV export
+		globals.css     # Global styles and theme vars
+```
 
-## Deploy on Vercel
+## API Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Frontend currently calls the repurposed hosted endpoint from the bot project backend.
+- Ensure the backend service from the organization project [JOB_SCRAPPER_TelegramBot](https://github.com/punyajain1/JOB_SCRAPPER_TelegramBot) is running and reachable.
