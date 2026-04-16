@@ -1,4 +1,4 @@
-# Job FE
+# ApplyFlow FE
 
 Frontend for the job search workflow used by my Telegram automation stack.
 It repurposes the backend from my organization Telegram bot project, collects search filters from the UI, and lets users generate and download results as CSV files.
