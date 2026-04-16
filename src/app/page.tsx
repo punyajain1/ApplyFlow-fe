@@ -55,7 +55,7 @@ export default function Home() {
         Object.entries(apiParams).filter(([, value]) => value !== "" && value !== null && value !== undefined)
       );
 
-      const res = await axios.post("https://job-scrapper-telegrambot.onrender.com/job-search", filteredParams, {
+      const res = await axios.post("https://jobscrappertelegrambot-production.up.railway.app/job-search", filteredParams, {
         headers: {
           'Content-Type': 'application/json',
         }
