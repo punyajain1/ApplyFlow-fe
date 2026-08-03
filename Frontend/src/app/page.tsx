@@ -449,9 +449,7 @@ ${resumeText}`;
               <option value="">All Sources</option>
               <option value="linkedin">LinkedIn</option>
               <option value="indeed">Indeed</option>
-              <option value="naukri">Naukri</option>
-              <option value="internshala">Internshala</option>
-              <option value="google">Google</option>
+
               <option value="hn">HN / YC</option>
             </select>
 
