@@ -3,7 +3,7 @@ from flask_cors import CORS
 import os
 import sys
 import re
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -42,7 +42,7 @@ VERBOSE         = 1
 LINKEDIN_FETCH  = True
 IS_REMOTE       = True    # Works for LinkedIn/Glassdoor/Naukri; Indeed: use 'remote' in search_term instead
 JOB_TYPE        = None    # None = all types (full-time + internship)
-SITES           = ["indeed", "linkedin", "google"]  # glassdoor=403 blocked, naukri=406 recaptcha
+SITES           = ["indeed", "linkedin"]  # google=429 blocked, glassdoor=403 blocked, naukri=406 recaptcha
 
 FRESHER_ROLES = [
     {
@@ -275,7 +275,7 @@ def _fetch_comment(comment_id):
             "location":   "",
             "source":     "hn",
             "text":       data.get("text", ""),
-            "posted_at":  datetime.utcfromtimestamp(data["time"]).isoformat() + "Z" if data.get("time") else None,
+            "posted_at":  datetime.fromtimestamp(data["time"], timezone.utc).isoformat() if data.get("time") else None,
             "job_url":    f"https://news.ycombinator.com/item?id={data.get('id')}",
             "hn_url":     f"https://news.ycombinator.com/item?id={data.get('id')}",
         }
@@ -333,7 +333,7 @@ def fetch_hn_job_stories(limit=100):
                 "location":   "",
                 "source":     "hn_jobs",
                 "text":       data.get("text", ""),
-                "posted_at":  datetime.utcfromtimestamp(data["time"]).isoformat() + "Z" if data.get("time") else None,
+                "posted_at":  datetime.fromtimestamp(data["time"], timezone.utc).isoformat() if data.get("time") else None,
                 "job_url":    job_url,
                 "hn_url":     f"https://news.ycombinator.com/item?id={data.get('id')}",
             })
@@ -381,7 +381,7 @@ def scrape_everything():
     """
     global daily_scrape_tracker
     
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     if daily_scrape_tracker["date"] != today:
         daily_scrape_tracker["date"] = today
         daily_scrape_tracker["count"] = 0
