@@ -1,0 +1,126 @@
+# =============================================
+# JOB SCRAPER CONFIG - B.TECH / SOFTWARE ROLES
+# =============================================
+# For: Software Developer, Engineer, IT, CS freshers/interns
+
+# ===========================================
+# SEARCH PARAMETERS
+# ===========================================
+# Main search term - works on most sites
+# TIP: Use quotes for exact match, - to exclude words
+# Examples for B.Tech:
+#   - "software developer intern"
+#   - "software engineer fresher"
+#   - '"python developer" intern -senior -lead'
+#   - "full stack developer fresher"
+#   - "backend developer intern"
+#   - "frontend developer fresher"
+#   - "java developer intern"
+SEARCH_TERM=software developer intern
+
+# Location (city, state, or country)
+LOCATION=India
+
+# ===========================================
+# GOOGLE JOBS SPECIFIC
+# ===========================================
+# Google needs exact syntax - search on google jobs in browser first,
+# apply filters, then copy the search text
+GOOGLE_SEARCH_TERM=software developer intern jobs in India
+
+# ===========================================
+# JOB SITES
+# ===========================================
+# All available sites are automatically used and filtered by country:
+#   India: indeed, linkedin, glassdoor, google, naukri, internshala
+#   USA: indeed, linkedin, glassdoor, google, zip_recruiter
+# No configuration needed - sites are auto-selected based on location
+
+# ===========================================
+# SEARCH FILTERS
+# ===========================================
+# Results per site (hardcoded to 100 for maximum responses)
+# RESULTS_WANTED=100
+
+# Jobs posted within last X hours
+HOURS_OLD=72
+
+# Country for Indeed & Glassdoor
+DEFAULT_COUNTRY=India
+
+# ===========================================
+# JOB TYPE
+# ===========================================
+# Options: fulltime, parttime, internship, contract
+# Leave empty for all types
+# For freshers looking for both jobs & internships, leave empty or use 'internship'
+JOB_TYPE=internship
+
+# Remote only jobs
+IS_REMOTE=false
+
+# ===========================================
+# ADVANCED OPTIONS (HARDCODED)
+# ===========================================
+# These are now hardcoded in the script for optimal performance:
+# - DISTANCE: 50 miles
+# - VERBOSE: 1 (detailed output)
+# - LINKEDIN_FETCH_DESCRIPTION: true (full job descriptions)
+
+# ===========================================
+# INTERNSHALA SPECIFIC
+# ===========================================
+# Category slugs for tech roles:
+#   - software-development (general)
+#   - web-development
+#   - mobile-app-development
+#   - data-science
+#   - machine-learning
+#   - python-django
+#   - java
+#   - frontend-development
+#   - backend-development
+#   - full-stack-development
+INTERNSHALA_SEARCH_TERM=software-development
+
+
+# =============================================
+# OTHER B.TECH SEARCH TERM EXAMPLES
+# =============================================
+# Copy any of these to SEARCH_TERM above:
+#
+# General Software:
+#   software developer intern
+#   software engineer fresher
+#   junior software developer
+#
+# Web Development:
+#   web developer intern
+#   full stack developer fresher
+#   frontend developer intern
+#   backend developer intern
+#   MERN stack developer fresher
+#
+# Specific Languages:
+#   python developer intern
+#   java developer fresher
+#   javascript developer intern
+#   react developer fresher
+#   node.js developer intern
+#
+# Data/ML:
+#   data analyst intern
+#   data scientist fresher
+#   machine learning intern
+#   AI engineer fresher
+#
+# DevOps/Cloud:
+#   devops engineer intern
+#   cloud engineer fresher
+#   AWS developer intern
+#
+# Mobile:
+#   android developer intern
+#   iOS developer fresher
+#   flutter developer intern
+#   react native developer fresher

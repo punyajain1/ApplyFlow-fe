@@ -1,0 +1,40 @@
+# Job Scraper + JobSpy Consolidated Dependencies
+# Install everything in one go with: pip install -r requirements.txt
+
+# Core dependencies
+requests>=2.31.0
+python-dotenv>=1.0.0
+pandas>=2.1.0
+
+# HTML parsing
+beautifulsoup4>=4.12.2
+lxml>=4.9.0
+
+# Data validation
+pydantic>=2.3.0
+
+# Markdown conversion (python-jobspy constraint)
+markdownify>=0.13.1,<0.14.0
+
+# TLS/SSL handling
+tls-client>=1.0.1
+urllib3>=2.0.0
+certifi>=2023.0.0
+
+# Numerical operations (satisfies scipy >=1.17.1 and JobSpy)
+numpy>=1.26.4,<2.7
+
+# Regex operations (JobSpy requirement)
+regex>=2024.4.28
+
+# Telegram Bot
+python-telegram-bot>=20.7
+
+# Flask Server
+flask>=3.0.0
+python-dotenv>=1.0.0
+flask_cors
+
+# Google Sheets Integration
+gspread>=6.0.0
+google-auth>=2.0.0
