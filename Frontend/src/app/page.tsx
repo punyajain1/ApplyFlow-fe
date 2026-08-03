@@ -20,7 +20,7 @@ type JobRecord = {
   [key: string]: any;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5050";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://applyflow-fe.onrender.com";
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
@@ -124,7 +124,7 @@ ${resumeText}`;
         Authorization: `Bearer ${aiKey}`,
         "Content-Type": "application/json",
       };
-      
+
       if (aiProvider === "openrouter") {
         headers["HTTP-Referer"] = window.location.href;
         headers["X-Title"] = "ApplyFlow Dashboard";
@@ -147,7 +147,7 @@ ${resumeText}`;
       if (content.endsWith("```")) content = content.slice(0, -3);
 
       const keywords: string[] = JSON.parse(content);
-      
+
       if (!Array.isArray(keywords)) throw new Error("LLM did not return an array");
 
       // Score jobs
@@ -156,7 +156,7 @@ ${resumeText}`;
         const titleLower = (job.title || "").toLowerCase();
         const descLower = (job.description_snippet || "").toLowerCase();
         const roleLower = (job.role_category || "").toLowerCase();
-        
+
         keywords.forEach((kw) => {
           const kwLower = kw.toLowerCase();
           if (titleLower.includes(kwLower)) {
@@ -165,7 +165,7 @@ ${resumeText}`;
             score += 1; // Standard weight for description or category match
           }
         });
-        
+
         return { ...job, aiScore: score };
       });
 
@@ -208,7 +208,9 @@ ${resumeText}`;
 
       const matchSource =
         filters.source === "" ||
-        job.source?.toLowerCase().includes(filters.source.toLowerCase());
+        (filters.source === "hn"
+          ? job.source?.toLowerCase() === "hn"
+          : job.source?.toLowerCase().includes(filters.source.toLowerCase()));
 
       return matchQ && matchRole && matchSource;
     });
@@ -271,7 +273,7 @@ ${resumeText}`;
 
   return (
     <main className="min-h-screen bg-[#050505] text-neutral-200 font-sans selection:bg-white selection:text-black pb-32">
-      
+
       {/* AI Match Modal */}
       <AnimatePresence>
         {showAiModal && (
@@ -289,7 +291,7 @@ ${resumeText}`;
             >
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-medium text-white tracking-tight">AI Resume Matcher</h2>
-                <button 
+                <button
                   onClick={() => setShowAiModal(false)}
                   className="text-neutral-500 hover:text-white transition-colors uppercase tracking-widest text-xs font-semibold"
                 >
@@ -336,7 +338,7 @@ ${resumeText}`;
                 <div className="flex flex-col gap-2">
                   <div className="flex justify-between items-center">
                     <label className="text-[12px] font-semibold tracking-widest text-neutral-500 uppercase">API Key</label>
-                    <a 
+                    <a
                       href={aiProvider === "groq" ? "https://console.groq.com/keys" : "https://openrouter.ai/settings/keys"}
                       target="_blank"
                       rel="noreferrer"
@@ -413,7 +415,7 @@ ${resumeText}`;
       </header>
 
       <div className="w-full max-w-[96%] mx-auto px-4 sm:px-8 mt-10">
-        
+
         {/* Controls Section */}
         <div className="flex flex-col lg:flex-row gap-4 mb-10">
           <input
@@ -449,17 +451,17 @@ ${resumeText}`;
               <option value="">All Sources</option>
               <option value="linkedin">LinkedIn</option>
               <option value="indeed">Indeed</option>
-
-              <option value="hn">HN / YC</option>
+              <option value="hn_jobs">HN Jobs</option>
+              <option value="hn">HN Posts</option>
             </select>
 
             <button
-            onClick={() => setShowAiModal(true)}
-            className="px-6 py-2.5 rounded-full bg-white text-black text-sm font-semibold hover:bg-neutral-200 transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(255,255,255,0.2)]"
-          >
-            AI Match
-            <span className="bg-black/10 text-black text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider -mr-1">BETA</span>
-          </button>
+              onClick={() => setShowAiModal(true)}
+              className="px-6 py-2.5 rounded-full bg-white text-black text-sm font-semibold hover:bg-neutral-200 transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(255,255,255,0.2)]"
+            >
+              AI Match
+              <span className="bg-black/10 text-black text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-wider -mr-1">BETA</span>
+            </button>
 
             <button
               onClick={downloadCSV}
@@ -479,7 +481,7 @@ ${resumeText}`;
                 <span className="text-white mx-1">{filteredJobs.length}</span> Opportunities
               </span>
               {aiMode && (
-                <button 
+                <button
                   onClick={clearAiMatch}
                   className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold uppercase tracking-widest transition-colors"
                 >
@@ -487,7 +489,7 @@ ${resumeText}`;
                 </button>
               )}
             </div>
-            
+
             {totalPages > 1 && (
               <span className="text-[12px] font-semibold tracking-widest text-neutral-500 uppercase">
                 Page <span className="text-white">{currentPage}</span> of {totalPages}
@@ -524,73 +526,124 @@ ${resumeText}`;
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             <AnimatePresence>
-              {paginatedJobs.map((job, idx) => (
-                <motion.div
-                  layout
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-                  key={job.id || idx}
-                  className="group bg-[#0a0a0a] rounded-[16px] p-5 border border-white/5 hover:border-white/20 hover:bg-[#0f0f0f] transition-all duration-300 flex flex-col relative overflow-hidden"
-                >
-                  {aiMode && job.aiScore !== undefined && (
-                    <div className="absolute top-0 right-0 bg-white/10 text-white text-[9px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-widest">
-                      Score: {job.aiScore}
-                    </div>
-                  )}
-                  
-                  <div className="mb-4 mt-2">
-                    <h3 className="text-[15px] font-medium text-white leading-snug mb-2 line-clamp-2">
-                      {job.title || "Untitled"}
-                    </h3>
-                    <div className="text-[13px] text-neutral-400 font-medium">
-                      {job.company || job.by || "Unknown Company"}
-                    </div>
-                  </div>
+              {paginatedJobs.map((job, idx) => {
+                const isHNPost = job.source?.toLowerCase() === "hn";
 
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {job.role_category && (
-                      <span className="px-2 py-1 text-[9px] font-semibold uppercase tracking-widest rounded-full bg-white/5 text-neutral-300">
-                        {job.role_category}
-                      </span>
+                return (
+                  <motion.div
+                    layout
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+                    key={job.id || idx}
+                    className="group bg-[#0a0a0a] rounded-[16px] p-5 border border-white/5 hover:border-white/20 hover:bg-[#0f0f0f] transition-all duration-300 flex flex-col relative overflow-hidden"
+                  >
+                    {aiMode && job.aiScore !== undefined && (
+                      <div className="absolute top-0 right-0 bg-white/10 text-white text-[9px] font-bold px-3 py-1 rounded-bl-xl uppercase tracking-widest z-10">
+                        Score: {job.aiScore}
+                      </div>
                     )}
-                    {job.source && (
-                      <span className="px-2 py-1 text-[9px] font-semibold uppercase tracking-widest rounded-full border border-white/10 text-neutral-500">
-                        {job.source}
-                      </span>
+
+                    {isHNPost ? (
+                      <>
+                        <div className="mb-4 mt-2">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-neutral-300 text-[10px] font-bold">
+                              {(job.company || job.by || "U")[0].toUpperCase()}
+                            </div>
+                            <h3 className="text-[14px] font-medium text-white leading-snug line-clamp-1">
+                              {job.company || job.by || "Unknown User"}
+                            </h3>
+                          </div>
+                          <div className="text-[12px] text-neutral-500 font-medium">
+                            Community Post
+                          </div>
+                        </div>
+
+                        {job.description_snippet && (
+                          <p className="text-[13px] text-neutral-400 line-clamp-4 leading-relaxed mb-6 flex-grow">
+                            {job.description_snippet}
+                          </p>
+                        )}
+
+                        <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-1 text-[9px] font-semibold uppercase tracking-widest rounded-full border border-white/10 text-neutral-500">
+                              HN Post
+                            </span>
+                            <span className="text-[10px] text-neutral-500 font-semibold tracking-widest uppercase ml-1">
+                              {formatDate(job.posted_at || job.scraped_at)}
+                            </span>
+                          </div>
+                          {job.job_url && (
+                            <a
+                              href={job.job_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 rounded-full bg-white text-black hover:bg-neutral-200 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0"
+                            >
+                              View Post
+                            </a>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="mb-4 mt-2">
+                          <h3 className="text-[15px] font-medium text-white leading-snug mb-2 line-clamp-2">
+                            {job.title || "Untitled"}
+                          </h3>
+                          <div className="text-[13px] text-neutral-400 font-medium">
+                            {job.company || job.by || "Unknown Company"}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {job.role_category && (
+                            <span className="px-2 py-1 text-[9px] font-semibold uppercase tracking-widest rounded-full bg-white/5 text-neutral-300">
+                              {job.role_category}
+                            </span>
+                          )}
+                          {job.source && (
+                            <span className="px-2 py-1 text-[9px] font-semibold uppercase tracking-widest rounded-full border border-white/10 text-neutral-500">
+                              {job.source}
+                            </span>
+                          )}
+                        </div>
+
+                        {job.location && (
+                          <div className="text-[11px] text-neutral-500 mb-4 font-medium line-clamp-1">
+                            {job.location}
+                          </div>
+                        )}
+
+                        {job.description_snippet && (
+                          <p className="text-[12px] text-neutral-400 line-clamp-3 leading-relaxed mb-6 flex-grow">
+                            {job.description_snippet}
+                          </p>
+                        )}
+
+                        <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
+                          <div className="text-[10px] text-neutral-500 font-semibold tracking-widest uppercase">
+                            {formatDate(job.posted_at || job.scraped_at)}
+                          </div>
+                          {job.job_url && (
+                            <a
+                              href={job.job_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 rounded-full bg-white text-black hover:bg-neutral-200 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0"
+                            >
+                              Apply
+                            </a>
+                          )}
+                        </div>
+                      </>
                     )}
-                  </div>
-
-                  {job.location && (
-                    <div className="text-[11px] text-neutral-500 mb-4 font-medium line-clamp-1">
-                      {job.location}
-                    </div>
-                  )}
-
-                  {job.description_snippet && (
-                    <p className="text-[12px] text-neutral-400 line-clamp-3 leading-relaxed mb-6 flex-grow">
-                      {job.description_snippet}
-                    </p>
-                  )}
-
-                  <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
-                    <div className="text-[10px] text-neutral-500 font-semibold tracking-widest uppercase">
-                      {formatDate(job.posted_at || job.scraped_at)}
-                    </div>
-                    {job.job_url && (
-                      <a
-                        href={job.job_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 rounded-full bg-white text-black text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0"
-                      >
-                        Apply
-                      </a>
-                    )}
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
           </div>
         )}
