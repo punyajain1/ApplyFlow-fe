@@ -20,7 +20,7 @@ type JobRecord = {
   [key: string]: any;
 };
 
-const API_BASE = "http://localhost:5050";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5050";
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
