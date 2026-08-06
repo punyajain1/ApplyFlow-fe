@@ -46,6 +46,8 @@ venv.bak/
 
 # Job scraper outputs
 jobs_backup_*.json
+scrape_jobs.json
+scrape_jobs.json.tmp
 
 # Logs
 *.log

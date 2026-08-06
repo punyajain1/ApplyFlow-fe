@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+import json
 from flask_cors import CORS
 import os
 import sys
@@ -33,11 +34,39 @@ daily_scrape_tracker = {
 }
 
 # ============================================================
-# BACKGROUND JOB STORE
+# BACKGROUND JOB STORE (file-backed so it survives restarts)
 # Maps job_id (str) → { status, started_at, finished_at, result, error }
 # ============================================================
-_scrape_jobs: dict = {}
+_JOBS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scrape_jobs.json')
 _scrape_jobs_lock = threading.Lock()
+
+def _load_jobs() -> dict:
+    """Read all jobs from disk. Returns empty dict on any error."""
+    try:
+        with open(_JOBS_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _save_jobs(jobs: dict) -> None:
+    """Write the full jobs dict to disk atomically."""
+    tmp = _JOBS_FILE + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(jobs, f)
+    os.replace(tmp, _JOBS_FILE)
+
+def _update_job(job_id: str, update: dict) -> None:
+    """Thread-safe read-modify-write of a single job entry."""
+    with _scrape_jobs_lock:
+        jobs = _load_jobs()
+        if job_id in jobs:
+            jobs[job_id].update(update)
+        _save_jobs(jobs)
+
+def _get_job(job_id: str) -> dict | None:
+    """Thread-safe fetch of a single job entry."""
+    with _scrape_jobs_lock:
+        return _load_jobs().get(job_id)
 
 # ============================================================
 # HARDCODED CONFIG — India | BTech Freshers | Last 24 Hours
@@ -379,12 +408,11 @@ def health():
 #  /scrape-everything  — ONE CALL → ALL SOURCES → GOOGLE SHEET
 # ──────────────────────────────────────────────────────────────
 def _run_scrape_job(job_id: str, yc_limit: int, hn_job_limit: int):
-    """Runs in a daemon thread. Updates _scrape_jobs[job_id] in-place."""
+    """Runs in a daemon thread. Persists job state to disk via _update_job."""
     global daily_scrape_tracker
 
     def _set(update: dict):
-        with _scrape_jobs_lock:
-            _scrape_jobs[job_id].update(update)
+        _update_job(job_id, update)
 
     try:
         sheet = init_sheet()
@@ -486,7 +514,8 @@ def scrape_everything():
 
     job_id = str(uuid.uuid4())
     with _scrape_jobs_lock:
-        _scrape_jobs[job_id] = {
+        jobs = _load_jobs()
+        jobs[job_id] = {
             'status':      'running',
             'started_at':  datetime.now().isoformat(),
             'finished_at': None,
@@ -494,6 +523,7 @@ def scrape_everything():
             'result':      None,
             'error':       None,
         }
+        _save_jobs(jobs)
 
     t = threading.Thread(
         target=_run_scrape_job,
@@ -510,7 +540,7 @@ def scrape_everything():
         'job_id':    job_id,
         'status':    'running',
         'poll_url':  f'/scrape-status/{job_id}',
-        'started_at': _scrape_jobs[job_id]['started_at'],
+        'started_at': _get_job(job_id)['started_at'],
     }), 202
 
 
@@ -523,8 +553,7 @@ def scrape_status(job_id):
     Returns the current state of a background scrape job.
     Possible statuses: 'running' | 'done' | 'error'
     """
-    with _scrape_jobs_lock:
-        job = _scrape_jobs.get(job_id)
+    job = _get_job(job_id)
 
     if job is None:
         return jsonify({'success': False, 'message': f'No job found with id {job_id}'}), 404
