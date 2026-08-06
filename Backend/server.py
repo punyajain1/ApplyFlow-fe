@@ -125,7 +125,7 @@ SHEET_HEADERS = [
     'role_category', 'title', 'company', 'location',
     'source', 'job_url', 'posted_at', 'scraped_at', 'description_snippet'
 ]
-CLEANUP_DAYS  = 3
+CLEANUP_DAYS  = 1   # delete jobs older than 24 hours
 
 
 def get_sheet():
@@ -573,6 +573,30 @@ def scrape_status(job_id):
         response['traceback'] = job['traceback']
 
     return jsonify(response), 200
+
+
+# ──────────────────────────────────────────────────────────────
+#  /cleanup  — Manually delete jobs older than 24 hours
+# ──────────────────────────────────────────────────────────────
+@app.route('/cleanup', methods=['POST'])
+def manual_cleanup():
+    """
+    Deletes all Google Sheet rows where scraped_at is older than CLEANUP_DAYS (1 day).
+    Call from the browser console:
+        fetch('https://applyflow-fe.onrender.com/cleanup', { method: 'POST' })
+            .then(r => r.json()).then(console.log)
+    """
+    try:
+        sheet   = get_sheet()
+        deleted = sheets_cleanup(sheet)
+        return jsonify({
+            'success': True,
+            'deleted': deleted,
+            'message': f'Deleted {deleted} job(s) older than {CLEANUP_DAYS} day(s).',
+        }), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'message': str(e), 'traceback': traceback.format_exc()}), 500
 
 
 # ──────────────────────────────────────────────────────────────
