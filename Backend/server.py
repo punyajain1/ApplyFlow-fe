@@ -153,7 +153,9 @@ def init_sheet():
 
 
 def sheets_cleanup(sheet, days=CLEANUP_DAYS):
-    """Delete rows where scraped_at is older than `days` days."""
+    """Delete rows where scraped_at is older than `days` days.
+    Uses batch range deletion to avoid hitting Google Sheets API quota limits.
+    """
     cutoff     = datetime.now() - timedelta(days=days)
     all_values = sheet.get_all_values()
     if len(all_values) <= 1:
@@ -172,11 +174,26 @@ def sheets_cleanup(sheet, days=CLEANUP_DAYS):
                 except ValueError:
                     pass
 
-    for row_idx in sorted(to_delete, reverse=True):
-        sheet.delete_rows(row_idx)
+    if not to_delete:
+        return 0
 
-    if to_delete:
-        print(f"🗑️  Deleted {len(to_delete)} jobs older than {days} days")
+    # Group consecutive row indices into ranges so we can delete in bulk
+    # e.g. [2,3,4,7,8] → [(2,4), (7,8)] — 2 API calls instead of 5
+    sorted_rows = sorted(to_delete, reverse=True)
+    ranges = []
+    end = start = sorted_rows[0]
+    for row in sorted_rows[1:]:
+        if row == end - 1:
+            end = row                        # extend the range
+        else:
+            ranges.append((end, start))      # save completed range
+            end = start = row
+    ranges.append((end, start))
+
+    for (range_start, range_end) in ranges:
+        sheet.delete_rows(range_start, range_end)
+
+    print(f"🗑️  Deleted {len(to_delete)} jobs older than {days} day(s) in {len(ranges)} batch(es)")
     return len(to_delete)
 
 
