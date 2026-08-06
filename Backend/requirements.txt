@@ -34,6 +34,7 @@ python-telegram-bot>=20.7
 flask>=3.0.0
 python-dotenv>=1.0.0
 flask_cors
+gunicorn>=21.2.0
 
 # Google Sheets Integration
 gspread>=6.0.0
