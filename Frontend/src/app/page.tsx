@@ -82,19 +82,51 @@ export default function Home() {
   const triggerScrape = async () => {
     setScraping(true);
     try {
-      await axios.get(`${API_BASE}/scrape-everything`);
+      // Step 1: Kick off the background job — returns immediately with a job_id
+      const startRes = await axios.get(`${API_BASE}/scrape-everything`);
+      if (startRes.data?.status === 429 || startRes.status === 429) {
+        alert("Daily limit reached (5/5). Please try again tomorrow.");
+        return;
+      }
+
+      const jobId = startRes.data?.job_id;
+      if (!jobId) throw new Error("No job_id returned from server");
+
+      // Step 2: Poll /scrape-status/<job_id> every 5 seconds until done or error
+      await new Promise<void>((resolve, reject) => {
+        const interval = setInterval(async () => {
+          try {
+            const statusRes = await axios.get(`${API_BASE}/scrape-status/${jobId}`);
+            const { status } = statusRes.data;
+            if (status === "done") {
+              clearInterval(interval);
+              resolve();
+            } else if (status === "error") {
+              clearInterval(interval);
+              reject(new Error(statusRes.data?.error || "Scrape job failed"));
+            }
+            // else still "running" — keep polling
+          } catch (pollErr) {
+            clearInterval(interval);
+            reject(pollErr);
+          }
+        }, 5000);
+      });
+
+      // Step 3: Fetch updated jobs from the sheet
       await fetchJobs();
     } catch (err: any) {
       console.error("Scraping failed:", err);
       if (err.response?.status === 429) {
         alert("Daily limit reached (5/5). Please try again tomorrow.");
       } else {
-        alert("Failed to trigger scrape.");
+        alert("Failed to trigger scrape: " + (err.message || "Unknown error"));
       }
     } finally {
       setScraping(false);
     }
   };
+
 
   const runAIMatch = async () => {
     if (!aiKey || !resumeText) {

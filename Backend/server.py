@@ -3,6 +3,8 @@ from flask_cors import CORS
 import os
 import sys
 import re
+import uuid
+import threading
 from datetime import datetime, date, timedelta, timezone
 import pandas as pd
 import requests
@@ -31,6 +33,13 @@ daily_scrape_tracker = {
 }
 
 # ============================================================
+# BACKGROUND JOB STORE
+# Maps job_id (str) → { status, started_at, finished_at, result, error }
+# ============================================================
+_scrape_jobs: dict = {}
+_scrape_jobs_lock = threading.Lock()
+
+# ============================================================
 # HARDCODED CONFIG — India | BTech Freshers | Last 24 Hours
 # ============================================================
 LOCATION        = "India"
@@ -38,8 +47,8 @@ COUNTRY         = "India"
 HOURS_OLD       = 24
 RESULTS_WANTED  = 200
 DISTANCE        = 100
-VERBOSE         = 1
-LINKEDIN_FETCH  = True
+VERBOSE         = 0
+LINKEDIN_FETCH  = False   # Disabled: fetching full descriptions per job is the #1 cause of timeout/OOM on Render
 IS_REMOTE       = True    # Works for LinkedIn/Glassdoor/Naukri; Indeed: use 'remote' in search_term instead
 JOB_TYPE        = None    # None = all types (full-time + internship)
 SITES           = ["indeed", "linkedin"]  # google=429 blocked, glassdoor=403 blocked, naukri=406 recaptcha
@@ -369,30 +378,13 @@ def health():
 # ──────────────────────────────────────────────────────────────
 #  /scrape-everything  — ONE CALL → ALL SOURCES → GOOGLE SHEET
 # ──────────────────────────────────────────────────────────────
-@app.route('/scrape-everything', methods=['GET'])
-def scrape_everything():
-    """
-    Scrapes all 5 fresher roles (India, 24h) + latest YC/HN "Who is hiring?" posts.
-    Writes new unique jobs to Google Sheet.
-    Auto-deletes jobs older than 3 days from the sheet.
-    Query params:
-        yc_limit (int): how many YC comments to fetch (default 150, max 500)
-        hn_job_limit (int): how many direct HN jobs to fetch (default 100)
-    """
+def _run_scrape_job(job_id: str, yc_limit: int, hn_job_limit: int):
+    """Runs in a daemon thread. Updates _scrape_jobs[job_id] in-place."""
     global daily_scrape_tracker
-    
-    today = datetime.now(timezone.utc).date()
-    if daily_scrape_tracker["date"] != today:
-        daily_scrape_tracker["date"] = today
-        daily_scrape_tracker["count"] = 0
-        
-    if daily_scrape_tracker["count"] >= 5:
-        return jsonify({
-            'success': False, 
-            'message': 'Daily scrape limit reached (5/5). Please try again tomorrow.'
-        }), 429
-        
-    daily_scrape_tracker["count"] += 1
+
+    def _set(update: dict):
+        with _scrape_jobs_lock:
+            _scrape_jobs[job_id].update(update)
 
     try:
         sheet = init_sheet()
@@ -401,21 +393,20 @@ def scrape_everything():
         deleted = sheets_cleanup(sheet)
 
         # 2. Scrape all fresher roles
-        all_jobs    = []
-        role_summary = {}
+        all_jobs, role_summary = [], {}
         for role_cfg in FRESHER_ROLES:
             jobs = scrape_role(role_cfg)
             role_summary[role_cfg['role']] = len(jobs)
             all_jobs.extend(jobs)
+            # update progress so the caller can see partial info
+            _set({'progress': f"Scraped {role_cfg['role']}"})
 
         # 3a. Fetch YC "Who is hiring?" thread posts
-        yc_limit = min(int(request.args.get('yc_limit', 150)), 500)
         yc_jobs, yc_thread = fetch_yc_jobs(limit=yc_limit)
         role_summary['YC/HN (Who is hiring?)'] = len(yc_jobs)
         all_jobs.extend(yc_jobs)
 
         # 3b. Fetch direct HN job posts (standalone YC company listings)
-        hn_job_limit = min(int(request.args.get('hn_job_limit', 100)), 200)
         hn_jobs = fetch_hn_job_stories(limit=hn_job_limit)
         role_summary['HN/Jobs (Direct)'] = len(hn_jobs)
         all_jobs.extend(hn_jobs)
@@ -431,25 +422,128 @@ def scrape_everything():
         # 5. Write to Google Sheet
         new_count = sheets_write_jobs(sheet, unique)
 
-        print(f"\n🎯 scrape-everything done: {len(unique)} unique, {new_count} new written, {deleted} old deleted")
+        print(f"\n🎯 [{job_id[:8]}] scrape-everything done: {len(unique)} unique, {new_count} new written, {deleted} old deleted")
 
-        return jsonify({
-            'success':      True,
-            'message':      f'Scraped {len(unique)} unique jobs | {new_count} new written | {deleted} old deleted',
-            'timestamp':    datetime.now().isoformat(),
-            'role_summary': role_summary,
-            'total_scraped': len(unique),
-            'new_written':  new_count,
-            'deleted_old':  deleted,
-            'yc_thread':    {
-                'title':      yc_thread['title'],
-                'hn_url':     yc_thread['hn_url'],
-            } if yc_thread else None,
-        }), 200
+        _set({
+            'status':       'done',
+            'finished_at':  datetime.now().isoformat(),
+            'progress':     'Completed',
+            'result': {
+                'success':       True,
+                'message':       f'Scraped {len(unique)} unique jobs | {new_count} new written | {deleted} old deleted',
+                'timestamp':     datetime.now().isoformat(),
+                'role_summary':  role_summary,
+                'total_scraped': len(unique),
+                'new_written':   new_count,
+                'deleted_old':   deleted,
+                'yc_thread': {
+                    'title':  yc_thread['title'],
+                    'hn_url': yc_thread['hn_url'],
+                } if yc_thread else None,
+            },
+        })
 
     except Exception as e:
         import traceback
-        return jsonify({'success': False, 'message': str(e), 'traceback': traceback.format_exc()}), 500
+        tb = traceback.format_exc()
+        print(f"❌ [{job_id[:8]}] scrape-everything failed: {e}\n{tb}")
+        _set({
+            'status':      'error',
+            'finished_at': datetime.now().isoformat(),
+            'progress':    'Failed',
+            'error':       str(e),
+            'traceback':   tb,
+        })
+
+
+@app.route('/scrape-everything', methods=['GET'])
+def scrape_everything():
+    """
+    Immediately returns a job_id and spawns a background thread to do the scraping.
+    Poll GET /scrape-status/<job_id> to check progress and get the final result.
+
+    Query params:
+        yc_limit (int)     : how many YC comments to fetch (default 150, max 500)
+        hn_job_limit (int) : how many direct HN jobs to fetch (default 100, max 200)
+    """
+    global daily_scrape_tracker
+
+    today = datetime.now(timezone.utc).date()
+    if daily_scrape_tracker["date"] != today:
+        daily_scrape_tracker["date"] = today
+        daily_scrape_tracker["count"] = 0
+
+    if daily_scrape_tracker["count"] >= 5:
+        return jsonify({
+            'success': False,
+            'message': 'Daily scrape limit reached (5/5). Please try again tomorrow.',
+        }), 429
+
+    daily_scrape_tracker["count"] += 1
+
+    yc_limit     = min(int(request.args.get('yc_limit',     150)), 500)
+    hn_job_limit = min(int(request.args.get('hn_job_limit', 100)), 200)
+
+    job_id = str(uuid.uuid4())
+    with _scrape_jobs_lock:
+        _scrape_jobs[job_id] = {
+            'status':      'running',
+            'started_at':  datetime.now().isoformat(),
+            'finished_at': None,
+            'progress':    'Starting…',
+            'result':      None,
+            'error':       None,
+        }
+
+    t = threading.Thread(
+        target=_run_scrape_job,
+        args=(job_id, yc_limit, hn_job_limit),
+        daemon=True,
+    )
+    t.start()
+
+    print(f"🚀 scrape-everything job {job_id[:8]} started (yc_limit={yc_limit}, hn_job_limit={hn_job_limit})")
+
+    return jsonify({
+        'success':   True,
+        'message':   'Scrape job started. Poll /scrape-status/<job_id> for progress.',
+        'job_id':    job_id,
+        'status':    'running',
+        'poll_url':  f'/scrape-status/{job_id}',
+        'started_at': _scrape_jobs[job_id]['started_at'],
+    }), 202
+
+
+# ──────────────────────────────────────────────────────────────
+#  /scrape-status/<job_id>  — Poll background scrape job status
+# ──────────────────────────────────────────────────────────────
+@app.route('/scrape-status/<job_id>', methods=['GET'])
+def scrape_status(job_id):
+    """
+    Returns the current state of a background scrape job.
+    Possible statuses: 'running' | 'done' | 'error'
+    """
+    with _scrape_jobs_lock:
+        job = _scrape_jobs.get(job_id)
+
+    if job is None:
+        return jsonify({'success': False, 'message': f'No job found with id {job_id}'}), 404
+
+    response = {
+        'job_id':      job_id,
+        'status':      job['status'],
+        'started_at':  job['started_at'],
+        'finished_at': job['finished_at'],
+        'progress':    job['progress'],
+    }
+
+    if job['status'] == 'done':
+        response.update(job['result'])
+    elif job['status'] == 'error':
+        response['error']     = job['error']
+        response['traceback'] = job['traceback']
+
+    return jsonify(response), 200
 
 
 # ──────────────────────────────────────────────────────────────
