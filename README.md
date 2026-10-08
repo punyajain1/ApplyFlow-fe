@@ -9,7 +9,7 @@ A unified, full-stack job search workflow and dashboard designed for developers.
 
 ## 🚀 Key Features
 
-- **Multi-Source Aggregation**: Pulls entry-level and fresh roles from major boards (LinkedIn, Indeed, Glassdoor) alongside direct API integrations with **HackerNews (Who is Hiring?)** and **YCombinator** startup jobs.
+- **Multi-Source Aggregation**: Pulls entry-level and fresh roles from major boards (LinkedIn, Indeed, Glassdoor) alongside direct API integrations with **HackerNews (Who is Hiring?)**, **YCombinator** startup jobs, **Arbeitnow**, **RemoteOK**, **Jobicy**, and **AI Dev Jobs**. It also features the **ApplyFlow Discovery Engine**, which directly tracks and scrapes the careers pages of top tech companies using popular ATS platforms (Greenhouse, Lever, Workday, etc.).
 - **AI Resume Match (Beta)**: Paste your resume and use a free AI provider (Groq or OpenRouter). The frontend uses an LLM to extract your precise skills/experience level, and instantly scores/sorts hundreds of jobs based on how well they match your background.
 - **Premium Dark Mode UI**: A highly polished, sleek dashboard built with Next.js, Tailwind CSS, and Framer Motion micro-interactions.
 - **Google Sheets Database**: The Python backend securely syncs scraped data directly to Google Sheets, making it incredibly easy to manage, edit, and export leads.
@@ -51,6 +51,12 @@ python3 server.py
 ```
 *(Runs on `http://localhost:5050` by default)*
 
+**Scraping Jobs**
+Once the backend server is running, trigger the job scraping process by calling the `/scrape-everything` endpoint (via browser or terminal):
+```bash
+curl http://localhost:5050/scrape-everything
+```
+
 ### 2. Frontend Setup
 
 The frontend provides the sleek UI and handles the AI matching logic.
@@ -67,6 +73,11 @@ ApplyFlow uses a hybrid AI approach to keep things incredibly fast and cheap:
 1. **Extraction**: The frontend sends *only your resume* to a fast LLM (like Groq's Llama 3) to extract your top skills, tools, and exact experience level (e.g. "Fresher").
 2. **Local Scoring**: It then runs a lightning-fast local algorithm directly in your browser, scoring every job in your database against those extracted keywords.
 3. **Weighting**: Jobs get +2 points if the keyword is found in the Title, and +1 point if found in the Description. The highest scored jobs immediately snap to the top of your grid!
+
+## 🔍 ApplyFlow Discovery Engine
+ApplyFlow features a custom built **Discovery Engine** designed to find jobs directly at the source—before they are even posted to massive aggregators like LinkedIn or Indeed. 
+- **Direct ATS Integration**: It automatically scans the `companies.txt` file located in the `Backend` directory, auto-detects the Applicant Tracking System (ATS) they use (such as Greenhouse, Lever, Workday, Darwinbox, Eightfold, SmartRecruiters, Keka, etc.), and reverse-engineers their API endpoints.
+- **Easy to Expand**: To add new companies to your tracking list, simply add their name and careers URL to `Backend/companies.txt`. The engine will figure out the rest and pull in fresh developer roles every time you run the scraper.
 
 ## 🔗 Related Project
 This backend was initially adapted from my organization Telegram bot project: [JOB_SCRAPPER_TelegramBot](https://github.com/punyajain1/JOB_SCRAPPER_TelegramBot), but has since been expanded significantly to support HackerNews/YC and secure frontend integration.
