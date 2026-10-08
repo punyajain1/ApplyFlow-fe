@@ -11,11 +11,17 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 
+# ATS Discovery Engine imports
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from dateutil import parser as date_parser
+
+
 # Load .env
 load_dotenv()
 
-# Add JobSpy to path
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'JobSpy-main'))
 from jobspy import scrape_jobs
 
 # Google Sheets
@@ -73,14 +79,14 @@ def _get_job(job_id: str) -> dict | None:
 # ============================================================
 LOCATION        = "India"
 COUNTRY         = "India"
-HOURS_OLD       = 24
+HOURS_OLD       = 12
 RESULTS_WANTED  = 200
 DISTANCE        = 100
 VERBOSE         = 0
 LINKEDIN_FETCH  = False   # Disabled: fetching full descriptions per job is the #1 cause of timeout/OOM on Render
 IS_REMOTE       = True    # Works for LinkedIn/Glassdoor/Naukri; Indeed: use 'remote' in search_term instead
 JOB_TYPE        = None    # None = all types (full-time + internship)
-SITES           = ["indeed", "linkedin"]  # google=429 blocked, glassdoor=403 blocked, naukri=406 recaptcha
+SITES           = ["linkedin"]  # google=429 blocked, glassdoor=403 blocked, naukri=406 recaptcha
 
 FRESHER_ROLES = [
     {
@@ -122,8 +128,8 @@ SCOPES        = [
     'https://www.googleapis.com/auth/drive',
 ]
 SHEET_HEADERS = [
-    'role_category', 'title', 'company', 'location',
-    'source', 'job_url', 'posted_at', 'scraped_at', 'description_snippet'
+    'role_category', 'title', 'company', 'location', 'work_mode', 'skills',
+    'source', 'job_url', 'posted_at', 'scraped_at', 'is_internship', 'is_fresher', 'description_snippet'
 ]
 CLEANUP_DAYS  = 1   # delete jobs older than 24 hours
 
@@ -190,11 +196,88 @@ def sheets_cleanup(sheet, days=CLEANUP_DAYS):
             end = start = row
     ranges.append((end, start))
 
+    # Fix: If we are about to delete all data rows, Google Sheets will throw an error 
+    # ("not possible to delete all non-frozen rows"). 
+    # Workaround: append a blank row first to ensure at least one non-frozen row exists.
+    if len(to_delete) == len(all_values) - 1:
+        try:
+            sheet.append_row([""] * len(SHEET_HEADERS))
+        except Exception:
+            pass
+
     for (range_start, range_end) in ranges:
         sheet.delete_rows(range_start, range_end)
 
     print(f"🗑️  Deleted {len(to_delete)} jobs older than {days} day(s) in {len(ranges)} batch(es)")
     return len(to_delete)
+
+
+
+# ============================================================
+# JOB ENRICHMENT LOGIC
+# ============================================================
+INTERNSHIP_KEYWORDS = ["intern", "internship", "summer intern", "sde intern", "software engineer intern"]
+FRESHER_KEYWORDS = ["fresher", "new grad", "graduate", "entry level", "associate engineer", "trainee"]
+SKILLS = ["Python", "Java", "C++", "Node.js", "TypeScript", "React", "Next.js", "Docker", "AWS", "PostgreSQL", "MongoDB", "Redis", "Kubernetes", "Go", "Golang", "Rust", "GraphQL", "Tailwind"]
+REMOTE_KWS = ["remote", "work from home", "wfh"]
+HYBRID_KWS = ["hybrid"]
+
+BACKEND_KWS = ["backend", "back-end", "server", "data engineer"]
+FRONTEND_KWS = ["frontend", "front-end", "react", "ui", "ux"]
+AI_KWS = ["machine learning", "ml", "ai", "llm", "data scientist"]
+DEVOPS_KWS = ["devops", "sre", "platform", "infrastructure"]
+FULLSTACK_KWS = ["fullstack", "full-stack", "full stack"]
+
+def enrich_job_data(job, text_desc):
+    title = str(job.get('title', '')).lower()
+    loc = str(job.get('location', '')).lower()
+    desc_lower = text_desc.lower()
+    
+    # 1. Internship & Fresher
+    is_internship = any(k in title or k in desc_lower for k in INTERNSHIP_KEYWORDS)
+    is_fresher = any(k in title or k in desc_lower for k in FRESHER_KEYWORDS)
+    
+    # 2. Work Mode
+    work_mode = "Onsite"
+    if any(k in loc or k in title or k in desc_lower for k in REMOTE_KWS):
+        work_mode = "Remote"
+    elif any(k in loc or k in title or k in desc_lower for k in HYBRID_KWS):
+        work_mode = "Hybrid"
+        
+    # 3. Location Normalization (India specific)
+    norm_loc = "Remote" if work_mode == "Remote" else job.get('location', '')
+    if work_mode != "Remote":
+        # simple normalization
+        if any(x in loc for x in ["bangalore", "bengaluru"]): norm_loc = "Bangalore"
+        elif any(x in loc for x in ["delhi", "ncr", "noida", "gurgaon", "gurugram"]): norm_loc = "Delhi NCR"
+        elif "mumbai" in loc: norm_loc = "Mumbai"
+        elif "pune" in loc: norm_loc = "Pune"
+        elif "hyderabad" in loc: norm_loc = "Hyderabad"
+        elif "chennai" in loc: norm_loc = "Chennai"
+    
+    # 4. Skills extraction
+    found_skills = []
+    for skill in SKILLS:
+        if skill.lower() in desc_lower or skill.lower() in title:
+            found_skills.append(skill)
+            
+    # 5. Role Category from title
+    role_category = job.get('role_category', 'Other')
+    if role_category in ['Discovery', 'YC/HN']:
+        if any(k in title for k in FULLSTACK_KWS): role_category = "Full Stack"
+        elif any(k in title for k in BACKEND_KWS): role_category = "Backend"
+        elif any(k in title for k in FRONTEND_KWS): role_category = "Frontend"
+        elif any(k in title for k in AI_KWS): role_category = "AI/ML"
+        elif any(k in title for k in DEVOPS_KWS): role_category = "DevOps"
+    
+    return {
+        "is_internship": "TRUE" if is_internship else "FALSE",
+        "is_fresher": "TRUE" if is_fresher else "FALSE",
+        "work_mode": work_mode,
+        "location": norm_loc,
+        "skills": ",".join(found_skills),
+        "role_category": role_category
+    }
 
 
 def sheets_write_jobs(sheet, jobs):
@@ -216,18 +299,24 @@ def sheets_write_jobs(sheet, jobs):
 
         raw_desc = str(job.get('description', '') or job.get('text', '') or '')
         desc     = re.sub(r'<[^>]+>', ' ', raw_desc)
-        desc     = ' '.join(desc.split())[:200]
+        desc     = ' '.join(desc.split())[:300] # Kept slightly longer for skills
+        
+        enriched = enrich_job_data(job, str(job.get('description', '') or job.get('text', '')))
 
         new_rows.append([
-            str(job.get('role_category', 'YC/HN'))[:50],
+            str(enriched['role_category'])[:50],
             str(job.get('title',   '') or '')[:150],
             str(job.get('company', '') or job.get('by', '') or '')[:100],
-            str(job.get('location','') or '')[:100],
+            str(enriched['location'])[:100],
+            str(enriched['work_mode']),
+            str(enriched['skills']),
             str(job.get('site',    '') or job.get('source', '') or 'hn')[:50],
             url[:500],
             str(job.get('date_posted','') or job.get('posted_at','') or '')[:50],
             now,
-            desc,
+            str(enriched['is_internship']),
+            str(enriched['is_fresher']),
+            desc[:200]
         ])
 
     if new_rows:
@@ -401,6 +490,430 @@ def fetch_hn_job_stories(limit=100):
     return jobs
 
 
+# ============================================================
+# NEW API HELPERS
+# ============================================================
+def fetch_arbeitnow_jobs(limit=100):
+    print("\n💼 Arbeitnow — fetching jobs...")
+    try:
+        r = requests.get("https://www.arbeitnow.com/api/job-board-api", timeout=10)
+        r.raise_for_status()
+        data = r.json().get('data', [])
+        jobs = []
+        for d in data[:limit]:
+            jobs.append({
+                "role_category": "Arbeitnow",
+                "title": d.get("title", ""),
+                "company": d.get("company_name", ""),
+                "location": d.get("location", ""),
+                "source": "arbeitnow",
+                "text": d.get("description", ""),
+                "posted_at": str(d.get("created_at", "")),
+                "job_url": d.get("url", ""),
+            })
+        print(f"   ✅ {len(jobs)} Arbeitnow jobs fetched")
+        return jobs
+    except Exception as e:
+        print(f"   ⚠️  Arbeitnow error: {e}")
+        return []
+
+def fetch_remoteok_jobs(limit=100):
+    print("\n💼 RemoteOK — fetching jobs...")
+    try:
+        r = requests.get("https://remoteok.com/api", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        jobs = []
+        for d in data:
+            if "legal" in d:
+                continue
+            jobs.append({
+                "role_category": "RemoteOK",
+                "title": d.get("position", ""),
+                "company": d.get("company", ""),
+                "location": d.get("location", ""),
+                "source": "remoteok",
+                "text": d.get("description", ""),
+                "posted_at": d.get("date", ""),
+                "job_url": d.get("url", ""),
+            })
+            if len(jobs) >= limit:
+                break
+        print(f"   ✅ {len(jobs)} RemoteOK jobs fetched")
+        return jobs
+    except Exception as e:
+        print(f"   ⚠️  RemoteOK error: {e}")
+        return []
+
+def fetch_jobicy_jobs(limit=100):
+    print("\n💼 Jobicy — fetching jobs...")
+    try:
+        r = requests.get("https://jobicy.com/api/v2/remote-jobs", timeout=10)
+        r.raise_for_status()
+        data = r.json().get("jobs", [])
+        jobs = []
+        for d in data[:limit]:
+            jobs.append({
+                "role_category": "Jobicy",
+                "title": d.get("jobTitle", ""),
+                "company": d.get("companyName", ""),
+                "location": d.get("jobGeo", ""),
+                "source": "jobicy",
+                "text": d.get("jobDescription", ""),
+                "posted_at": d.get("pubDate", ""),
+                "job_url": d.get("jobUrl", ""),
+            })
+        print(f"   ✅ {len(jobs)} Jobicy jobs fetched")
+        return jobs
+    except Exception as e:
+        print(f"   ⚠️  Jobicy error: {e}")
+        return []
+
+def fetch_aidev_jobs(limit=100):
+    print("\n💼 AI Dev Jobs — fetching jobs...")
+    try:
+        r = requests.get("https://aidevboard.com/api/v1/jobs", timeout=10)
+        r.raise_for_status()
+        resp = r.json()
+        data = resp.get("jobs", resp.get("data", resp)) if isinstance(resp, dict) else resp
+        jobs = []
+        for d in (data if isinstance(data, list) else [])[:limit]:
+            jobs.append({
+                "role_category": "AI Dev Jobs",
+                "title": d.get("title", ""),
+                "company": d.get("company", d.get("company_name", "")),
+                "location": d.get("location", ""),
+                "source": "aidevjobs",
+                "text": d.get("description", ""),
+                "posted_at": d.get("published_at", d.get("created_at", "")),
+                "job_url": d.get("url", ""),
+            })
+        print(f"   ✅ {len(jobs)} AI Dev Jobs fetched")
+        return jobs
+    except Exception as e:
+        print(f"   ⚠️  AI Dev Jobs error: {e}")
+
+
+
+def get_session():
+    session = requests.Session()
+    retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    return session
+
+class ATSDetector:
+    def __init__(self):
+        self.session = get_session()
+        self.ats_domains = {
+            "greenhouse.io": "greenhouse",
+            "jobs.lever.co": "lever",
+            "lever.co": "lever",
+            "ashbyhq.com": "ashby",
+            "myworkdayjobs.com": "workday",
+            "myworkdaysite.com": "workday",
+            "smartrecruiters.com": "smartrecruiters",
+            "eightfold.ai": "eightfold",
+            "icims.com": "icims",
+            "taleo.net": "taleo",
+            "oraclecloud.com/hcmUI": "oracle",
+            "successfactors.com": "successfactors",
+            "successfactors.eu": "successfactors",
+            "zohorecruit.com": "zohorecruit",
+            "zohorecruit.in": "zohorecruit",
+            "zoho.com/recruit": "zohorecruit",
+            "freshteam.com": "freshteam",
+            "keka.com": "keka",
+            "darwinbox.in": "darwinbox",
+            "darwinbox.com": "darwinbox",
+            "workable.com": "workable",
+            "recruitee.com": "recruitee",
+            "bamboohr.com": "bamboohr",
+            "phenompeople.com": "phenom",
+            "phenom.com": "phenom",
+            "avature.net": "avature",
+            "jobvite.com": "jobvite",
+            "wellfound.com": "wellfound",
+            "angel.co": "wellfound",
+            "naukri.com": "naukri",
+            "instahyre.com": "instahyre"
+        }
+
+    def detect_ats(self, website_url):
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            resp = self.session.get(website_url, headers=headers, timeout=10)
+            if resp.status_code != 200: return None
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            for a in soup.find_all('a', href=True):
+                for domain, type_ in self.ats_domains.items():
+                    if domain in a['href']:
+                        parsed = urlparse(a['href'])
+                        parts = [p for p in parsed.path.split('/') if p]
+                        if type_ == "workday":
+                            tenant_prefix = parsed.netloc.split('.')[0]
+                            catalog = parts[0] if parts else tenant_prefix
+                            return {"type": type_, "slug": f"{parsed.netloc}|{tenant_prefix}|{catalog}"}
+                        elif type_ == "eightfold":
+                            return {"type": type_, "slug": parsed.netloc}
+                        elif type_ == "taleo":
+                            portal = "ex"
+                            if len(parts) >= 2 and parts[0] == "careersection":
+                                portal = parts[1]
+                            return {"type": type_, "slug": f"{parsed.netloc}|{portal}"}
+                        if parts: return {"type": type_, "slug": parts[0]}
+            for domain, type_ in self.ats_domains.items():
+                if domain in resp.text:
+                    if type_ == "workday":
+                        match = re.search(r'https?://([a-zA-Z0-9_.-]+\.myworkdayjobs\.com)/([a-zA-Z0-9_-]+)', resp.text)
+                        if match:
+                            netloc = match.group(1)
+                            tenant_prefix = netloc.split('.')[0]
+                            return {"type": type_, "slug": f"{netloc}|{tenant_prefix}|{match.group(2)}"}
+                    elif type_ == "eightfold":
+                        match = re.search(r'https?://([a-zA-Z0-9_.-]+\.eightfold\.ai)', resp.text)
+                        if match: return {"type": type_, "slug": match.group(1)}
+                    elif type_ == "taleo":
+                        match = re.search(r'https?://([a-zA-Z0-9_.-]+\.taleo\.net)/careersection/([a-zA-Z0-9_-]+)/', resp.text)
+                        if match: return {"type": type_, "slug": f"{match.group(1)}|{match.group(2)}"}
+                    else:
+                        match = re.search(r'https?://[^"\']+' + domain.replace(".", r"\.") + r'/([a-zA-Z0-9_-]+)', resp.text)
+                        if match: return {"type": type_, "slug": match.group(1)}
+        except: pass
+        return None
+
+
+def is_recent_enough(date_str, max_hours):
+    if not date_str: return True
+    now = datetime.now(timezone.utc)
+    try:
+        if isinstance(date_str, int) or (isinstance(date_str, str) and date_str.isdigit()):
+            ts = int(date_str)
+            if ts > 9999999999: ts = ts / 1000
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        else:
+            dt = date_parser.parse(str(date_str))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        return (now - dt).total_seconds() <= (max_hours * 3600)
+    except Exception:
+        return True
+
+def fetch_company_jobs():
+    print("\n💼 ApplyFlow Discovery Engine — fetching jobs from companies.txt...")
+    companies_file = os.path.join(os.path.dirname(__file__), "companies.txt")
+    if not os.path.exists(companies_file):
+        print("   ⚠️ companies.txt not found.")
+        return []
+        
+    companies = []
+    with open(companies_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            if ',' in line:
+                name, url = line.split(',', 1)
+                companies.append({'name': name.strip(), 'url': url.strip()})
+            else:
+                companies.append({'name': line, 'url': None})
+                
+    ats_detector = ATSDetector()
+    session = get_session()
+    all_jobs = []
+    
+    for comp in companies:
+        company = comp['name']
+        explicit_url = comp['url']
+        
+        if explicit_url:
+            ats = ats_detector.detect_ats(explicit_url)
+        else:
+            website_url = f"https://www.{company.lower().replace(' ', '')}.com"
+            ats = ats_detector.detect_ats(website_url)
+            if not ats:
+                ats = ats_detector.detect_ats(website_url + "/careers")
+        if not ats:
+            continue
+            
+        print(f"   🔍 {company}: Detected {ats['type']} (slug: {ats['slug']})")
+        
+        try:
+            if ats['type'] == 'greenhouse':
+                r = session.get(f"https://boards-api.greenhouse.io/v1/boards/{ats['slug']}/jobs?content=true", timeout=10)
+                if r.status_code == 200:
+                    for d in r.json().get("jobs", []):
+                        job_content = d.get("content", "")
+                        desc = BeautifulSoup(job_content, "html.parser").get_text(separator=" ", strip=True)[:300] if job_content else ""
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": d.get("title", ""),
+                            "company": company.title(),
+                            "location": d.get("location", {}).get("name", ""),
+                            "source": "greenhouse",
+                            "text": desc,
+                            "posted_at": d.get("updated_at", ""),
+                            "job_url": d.get("absolute_url", ""),
+                        })
+            elif ats['type'] == 'lever':
+                r = session.get(f"https://api.lever.co/v0/postings/{ats['slug']}?mode=json", timeout=10)
+                if r.status_code == 200:
+                    for d in r.json():
+                        created_at = d.get("createdAt")
+                        posted = datetime.fromtimestamp(created_at/1000, timezone.utc).isoformat() if created_at else ""
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": d.get("text", ""),
+                            "company": company.title(),
+                            "location": d.get("categories", {}).get("location", ""),
+                            "source": "lever",
+                            "text": BeautifulSoup(d.get("description", ""), "html.parser").get_text(strip=True)[:300],
+                            "posted_at": posted,
+                            "job_url": d.get("hostedUrl", ""),
+                        })
+            elif ats['type'] == 'ashby':
+                r = session.post(f"https://api.ashbyhq.com/posting-api/job-board/{ats['slug']}", json={}, timeout=10)
+                if r.status_code == 200:
+                    for d in r.json().get("jobs", []):
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": d.get("title", ""),
+                            "company": company.title(),
+                            "location": d.get("location", ""),
+                            "source": "ashby",
+                            "text": "",
+                            "posted_at": d.get("publishedAt", ""),
+                            "job_url": d.get("jobUrl", ""),
+                        })
+            elif ats['type'] == 'smartrecruiters':
+                r = session.get(f"https://api.smartrecruiters.com/v1/companies/{ats['slug']}/postings", timeout=10)
+                if r.status_code == 200:
+                    for d in r.json().get("content", []):
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": d.get("name", ""),
+                            "company": company.title(),
+                            "location": d.get("location", {}).get("city", ""),
+                            "source": "smartrecruiters",
+                            "text": "",
+                            "posted_at": d.get("releasedDate", ""),
+                            "job_url": f"https://jobs.smartrecruiters.com/{ats['slug']}/{d.get('id')}",
+                        })
+            elif ats['type'] == 'workable':
+                url = f"https://apply.workable.com/api/v3/accounts/{ats['slug']}/jobs"
+                r = session.post(url, json={}, timeout=10)
+                if r.status_code in (404, 405): r = session.get(url, timeout=10)
+                if r.status_code == 200:
+                    for d in r.json().get("results", []):
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": d.get("title", ""),
+                            "company": company.title(),
+                            "location": d.get("location", {}).get("city", ""),
+                            "source": "workable",
+                            "text": "",
+                            "posted_at": d.get("published_on", ""),
+                            "job_url": d.get("url", ""),
+                        })
+            elif ats['type'] == 'workday':
+                try:
+                    netloc, tenant_prefix, catalog = ats['slug'].split('|')
+                except:
+                    tenant_prefix = ats['slug'].split('/')[0]
+                    netloc = f"{tenant_prefix}.myworkdayjobs.com"
+                    catalog = ats['slug'].split('/')[-1] if '/' in ats['slug'] else tenant_prefix
+                
+                url = f"https://{netloc}/wday/cxs/{tenant_prefix}/{catalog}/jobs"
+                payload = {"appliedFacets":{},"limit":20,"offset":0,"searchText":""}
+                headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
+                r = session.post(url, json=payload, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    for d in r.json().get("jobPostings", []):
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": d.get("title", ""),
+                            "company": company.title(),
+                            "location": d.get("locationsText", ""),
+                            "source": "workday",
+                            "text": "",
+                            "posted_at": d.get("postedOn", ""),
+                            "job_url": f"https://{netloc}/en-US/{catalog}{d.get('externalPath', '')}",
+                        })
+            elif ats['type'] == 'eightfold':
+                domain = ats['slug']
+                url = f"https://{domain}/api/apply/v2/jobs?domain={domain}&start=0&num=100"
+                headers = {"User-Agent": "Mozilla/5.0"}
+                r = session.get(url, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    for d in r.json().get("positions", []):
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": d.get("name", ""),
+                            "company": company.title(),
+                            "location": d.get("location", ""),
+                            "source": "eightfold",
+                            "text": "",
+                            "posted_at": "",
+                            "job_url": f"https://{domain}/careers?pid={d.get('id', '')}",
+                        })
+            elif ats['type'] == 'taleo':
+                try:
+                    tenant, portal = ats['slug'].split('|')
+                except:
+                    tenant = ats['slug']
+                    portal = "ex"
+                
+                # Taleo often needs a session cookie first
+                session.get(f"https://{tenant}/careersection/{portal}/jobsearch.ftl?lang=en", timeout=10)
+                url = f"https://{tenant}/careersection/rest/jobboard/searchjobs?lang=en&portal={portal}"
+                payload = {
+                    "multilineEnabled": False,
+                    "sortingSelection": {"sortBySelectionParam": "3", "ascendingSortingOrder": "false"},
+                    "fieldData": {"fields": {"KEYWORD": "", "LOCATION": ""}, "valid": True},
+                    "filterSelectionParam": {"searchFilterSelections": [{"id": "POSTING_DATE", "selectedValues": []}, {"id": "LOCATION", "selectedValues": []}, {"id": "JOB_FIELD", "selectedValues": []}, {"id": "JOB_SCHEDULE", "selectedValues": []}]},
+                    "advancedSearchFiltersSelectionParam": {"searchFilterSelections": [{"id": "ORGANIZATION", "selectedValues": []}, {"id": "LOCATION", "selectedValues": []}, {"id": "JOB_FIELD", "selectedValues": []}, {"id": "JOB_NUMBER", "selectedValues": []}, {"id": "URGENT_NEED", "selectedValues": []}, {"id": "SHIFT", "selectedValues": []}]},
+                    "pageNo": 1
+                }
+                headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json", "tz": "GMT+05:30"}
+                r = session.post(url, json=payload, headers=headers, timeout=15)
+                if r.status_code == 200:
+                    for d in r.json().get("requisitionList", []):
+                        # Taleo sometimes returns column data as a list of strings
+                        title = d.get("column", [""])[0] if isinstance(d.get("column"), list) else d.get("title", "")
+                        all_jobs.append({
+                            "role_category": "Discovery",
+                            "title": title,
+                            "company": company.title(),
+                            "location": "",
+                            "source": "taleo",
+                            "text": "",
+                            "posted_at": "",
+                            "job_url": f"https://{tenant}/careersection/{portal}/jobdetail.ftl?job={d.get('contestNo', '')}",
+                        })
+        except Exception as e:
+            print(f"   ⚠️ Error fetching {company} via {ats['type']}: {e}")
+            
+    # Filter for India jobs AND recent jobs only
+    india_keywords = ['india', 'bengaluru', 'bangalore', 'mumbai', 'delhi', 'ncr', 'gurugram', 'gurgaon', 'noida', 'pune', 'hyderabad', 'chennai', 'ahmedabad', 'kolkata']
+    filtered_jobs = []
+    for job in all_jobs:
+        loc = str(job.get('location', '')).lower()
+        
+        # 1. Location Check
+        if not any(k in loc for k in india_keywords):
+            continue
+            
+        # 2. Time Check
+        posted = job.get('posted_at')
+        if not is_recent_enough(posted, HOURS_OLD):
+            continue
+            
+        filtered_jobs.append(job)
+            
+    print(f"   ✅ {len(filtered_jobs)} Discovery Engine jobs fetched (filtered for India & last {HOURS_OLD}h out of {len(all_jobs)} total)")
+    return filtered_jobs
+
+
+
 # ================================================================
 #  ENDPOINTS
 # ================================================================
@@ -455,6 +968,31 @@ def _run_scrape_job(job_id: str, yc_limit: int, hn_job_limit: int):
         hn_jobs = fetch_hn_job_stories(limit=hn_job_limit)
         role_summary['HN/Jobs (Direct)'] = len(hn_jobs)
         all_jobs.extend(hn_jobs)
+
+        # 3c. Fetch Arbeitnow
+        arbeitnow_jobs = fetch_arbeitnow_jobs(limit=100)
+        role_summary['Arbeitnow'] = len(arbeitnow_jobs)
+        all_jobs.extend(arbeitnow_jobs)
+
+        # 3d. Fetch RemoteOK
+        remoteok_jobs = fetch_remoteok_jobs(limit=100)
+        role_summary['RemoteOK'] = len(remoteok_jobs)
+        all_jobs.extend(remoteok_jobs)
+
+        # 3e. Fetch Jobicy
+        jobicy_jobs = fetch_jobicy_jobs(limit=100)
+        role_summary['Jobicy'] = len(jobicy_jobs)
+        all_jobs.extend(jobicy_jobs)
+
+        # 3f. Fetch AI Dev Jobs
+        aidev_jobs = fetch_aidev_jobs(limit=100)
+        role_summary['AI Dev Jobs'] = len(aidev_jobs)
+        all_jobs.extend(aidev_jobs)
+
+        # 3g. Discovery Engine (Greenhouse, Lever, Ashby, Workable, SmartRecruiters)
+        discovery_jobs = fetch_company_jobs()
+        role_summary['Discovery Engine'] = len(discovery_jobs)
+        all_jobs.extend(discovery_jobs)
 
         # 4. Deduplicate by job_url before writing
         seen, unique = set(), []
@@ -554,6 +1092,108 @@ def scrape_everything():
     return jsonify({
         'success':   True,
         'message':   'Scrape job started. Poll /scrape-status/<job_id> for progress.',
+        'job_id':    job_id,
+        'status':    'running',
+        'poll_url':  f'/scrape-status/{job_id}',
+        'started_at': _get_job(job_id)['started_at'],
+    }), 202
+
+
+
+def _run_discovery_only_job(job_id: str):
+    def _set(update: dict):
+        _update_job(job_id, update)
+
+    try:
+        sheet = init_sheet()
+        deleted = sheets_cleanup(sheet)
+        
+        all_jobs, role_summary = [], {}
+        
+        _set({'progress': 'Fetching Discovery Engine jobs...'})
+        discovery_jobs = fetch_company_jobs()
+        role_summary['Discovery Engine'] = len(discovery_jobs)
+        all_jobs.extend(discovery_jobs)
+        
+        seen, unique = set(), []
+        for job in all_jobs:
+            url = job.get('job_url') or job.get('hn_url') or ''
+            if url and url not in seen:
+                seen.add(url)
+                unique.append(job)
+                
+        new_count = sheets_write_jobs(sheet, unique)
+        
+        print(f"🎯 [{job_id[:8]}] scrape-discovery done: {len(unique)} unique, {new_count} new written, {deleted} old deleted")
+        
+        _set({
+            'status':       'done',
+            'finished_at':  datetime.now().isoformat(),
+            'progress':     'Completed',
+            'result': {
+                'success':       True,
+                'message':       f'Scraped {len(unique)} unique jobs | {new_count} new written | {deleted} old deleted',
+                'timestamp':     datetime.now().isoformat(),
+                'role_summary':  role_summary,
+                'total_scraped': len(unique),
+                'new_written':   new_count,
+                'deleted_old':   deleted,
+            },
+        })
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"❌ [{job_id[:8]}] scrape-discovery failed: {e}\n{tb}")
+        _set({
+            'status':      'error',
+            'finished_at': datetime.now().isoformat(),
+            'progress':    'Failed',
+            'error':       str(e),
+            'traceback':   tb,
+        })
+
+@app.route('/scrape-discovery', methods=['GET'])
+def scrape_discovery():
+    global daily_scrape_tracker
+
+    today = datetime.now(timezone.utc).date()
+    if daily_scrape_tracker["date"] != today:
+        daily_scrape_tracker["date"] = today
+        daily_scrape_tracker["count"] = 0
+
+    if daily_scrape_tracker["count"] >= 10:
+        return jsonify({
+            'success': False,
+            'message': 'Daily scrape limit reached. Please try again tomorrow.',
+        }), 429
+
+    daily_scrape_tracker["count"] += 1
+
+    job_id = str(uuid.uuid4())
+    with _scrape_jobs_lock:
+        jobs = _load_jobs()
+        jobs[job_id] = {
+            'status':      'running',
+            'started_at':  datetime.now().isoformat(),
+            'finished_at': None,
+            'progress':    'Starting Discovery Engine...',
+            'result':      None,
+            'error':       None,
+        }
+        _save_jobs(jobs)
+
+    t = threading.Thread(
+        target=_run_discovery_only_job,
+        args=(job_id,),
+        daemon=True,
+    )
+    t.start()
+
+    print(f"🚀 scrape-discovery job {job_id[:8]} started")
+
+    return jsonify({
+        'success':   True,
+        'message':   'Discovery job started. Poll /scrape-status/<job_id> for progress.',
         'job_id':    job_id,
         'status':    'running',
         'poll_url':  f'/scrape-status/{job_id}',
@@ -731,14 +1371,14 @@ if __name__ == '__main__':
     print("🚀 Job Scraper Server — India BTech Fresher Edition")
     print("=" * 58)
     print(f"   📍 Location  : {LOCATION}")
-    print(f"   🕐 Hours old : {HOURS_OLD}h (last 24 hours only)")
+    print(f"   🕐 Hours old : {HOURS_OLD}h")
     print(f"   🌐 Sites     : {', '.join(SITES)}")
     print(f"   🎯 Roles     : {', '.join(r['role'] for r in FRESHER_ROLES)}")
     print(f"   📊 Sheet ID  : {'✅ configured' if SHEET_ID else '❌ missing (set GOOGLE_SHEET_ID in .env)'}")
     print("=" * 58)
     print("\n📖 Endpoints:")
     print("   GET  /health              — Server status + config")
-    print("   GET  /scrape-everything   — ★ All roles + YC → Google Sheet")
+    print("   GET  /scrape-everything   — ★ All roles + YC + APIs → Google Sheet")
     print("        ?yc_limit=N          — YC comment limit (default 150)")
     print("   GET  /jobs                — Read all jobs from Google Sheet")
     print("        ?role=  ?source=  ?q=")
